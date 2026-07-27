@@ -33,6 +33,11 @@ DEFAULT_UE_INTERFACE = "uesimtun0"
 
 LEADER_ID = "leader_car"
 FOLLOWER_ID = "follower_car"
+VEHICLE_LABEL_POIS = {
+    LEADER_ID: "label_leader_car",
+    FOLLOWER_ID: "label_follower_car",
+}
+VEHICLE_LABEL_Y_OFFSET = -5.0
 DEFAULT_SCENARIO = "rear_end_emergency_brake"
 DEFAULT_UE_ID = "ueransim-ue-001"
 
@@ -434,6 +439,38 @@ def setup_gui() -> None:
         print(f"[warn] GUI setup skipped: {exc}")
 
 
+def setup_vehicle_labels() -> None:
+    """Create transparent POIs whose type text acts as an offset label."""
+    existing_pois = set(traci.poi.getIDList())
+    for vehicle_id, poi_id in VEHICLE_LABEL_POIS.items():
+        x, y = traci.vehicle.getPosition(vehicle_id)
+        if poi_id not in existing_pois:
+            traci.poi.add(
+                poi_id,
+                x,
+                y + VEHICLE_LABEL_Y_OFFSET,
+                (0, 0, 0, 0),
+                poiType=vehicle_id,
+                layer=100,
+                width=0.1,
+                height=0.1,
+            )
+
+
+def update_vehicle_labels(
+    leader: dict[str, Any],
+    follower: dict[str, Any],
+) -> None:
+    """Keep GUI labels below the two controlled vehicles."""
+    for state in (leader, follower):
+        poi_id = VEHICLE_LABEL_POIS[state["vehicle_id"]]
+        traci.poi.setPosition(
+            poi_id,
+            float(state["x"]),
+            float(state["y"]) + VEHICLE_LABEL_Y_OFFSET,
+        )
+
+
 def set_warning_visual(active: bool) -> None:
     try:
         if active:
@@ -664,6 +701,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 set_warning_visual(False)
                 if args.gui:
                     setup_gui()
+                    setup_vehicle_labels()
                 print(
                     f"[event] t={sim_time:.1f}s vehicles ready; "
                     f"follower safety override enabled for controlled trial"
@@ -807,6 +845,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
             leader = vehicle_state(LEADER_ID)
             follower = vehicle_state(FOLLOWER_ID)
+            if args.gui:
+                update_vehicle_labels(leader, follower)
             truth = local_ground_truth(
                 leader,
                 follower,

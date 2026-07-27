@@ -54,9 +54,9 @@
           shape="610,-17 615,-12 610,-7 605,-12"/>
 
     <poi id="emergency_brake_zone" name="EMERGENCY BRAKE ZONE"
-         type="test-zone" color="255,174,38" icon="pin"
+         type="EMERGENCY BRAKE ZONE" color="255,174,38" icon="pin"
          layer="10" x="250" y="7"/>
     <poi id="v2x_mec_control" name="V2X / MEC CONTROL"
-         type="control-center" color="70,180,235" icon="pin"
+         type="V2X / MEC CONTROL" color="70,180,235" icon="pin"
          layer="10" x="402" y="45"/>
 </additional>
