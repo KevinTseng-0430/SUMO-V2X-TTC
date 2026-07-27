@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <vType id="leaderType"
+           vClass="passenger"
+           guiShape="passenger/sedan"
+           color="220,45,45"
+           carFollowModel="Krauss"
+           accel="2.0"
+           decel="8.0"
+           emergencyDecel="9.0"
+           sigma="0.0"
+           tau="1.2"
+           minGap="2.5"
+           length="5.0"
+           width="1.8"
+           maxSpeed="20.0"/>
+
+    <vType id="followerType"
+           vClass="passenger"
+           guiShape="passenger/hatchback"
+           color="30,110,235"
+           carFollowModel="Krauss"
+           accel="2.0"
+           decel="8.0"
+           emergencyDecel="9.0"
+           sigma="0.0"
+           tau="1.2"
+           minGap="2.5"
+           length="5.0"
+           width="1.8"
+           maxSpeed="20.0"/>
+
+    <route id="rear_end_route" edges="main_road"/>
+
+    <!-- departPos refers to the front bumper: 100 - 5 - 67 = 28 m net gap. -->
+    <vehicle id="leader_car"
+             type="leaderType"
+             route="rear_end_route"
+             depart="0"
+             departLane="0"
+             departPos="100"
+             departSpeed="20.0"/>
+
+    <vehicle id="follower_car"
+             type="followerType"
+             route="rear_end_route"
+             depart="0"
+             departLane="0"
+             departPos="67"
+             departSpeed="20.0"/>
+</routes>

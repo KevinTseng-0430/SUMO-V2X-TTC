@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edges xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/edges_file.xsd">
+    <!-- 100 km/h closed proving-ground lane. The event itself is controlled by TraCI. -->
+    <edge id="main_road"
+          from="A"
+          to="B"
+          priority="1"
+          numLanes="1"
+          speed="27.78"/>
+</edges>

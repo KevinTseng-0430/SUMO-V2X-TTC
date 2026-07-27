@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<viewsettings>
+    <scheme name="v2x_rear_end">
+        <opengl antialiase="1" dither="0"/>
+        <background backgroundColor="98,150,88"
+                    showGrid="0"
+                    gridXSize="100"
+                    gridYSize="100"/>
+        <edges laneEdgeMode="0"
+               scaleMode="0"
+               laneShowBorders="1"
+               showBikeMarkings="1"
+               showLinkDecals="1"
+               showDirection="0"
+               widthExaggeration="1.0"
+               minSize="1.0">
+            <colorScheme name="uniform">
+                <entry color="55,59,63" name="road"/>
+                <entry color="188,188,182" name="sidewalk"/>
+                <entry color="192,66,44" name="bike lane"/>
+                <entry color="0,0,0,0" name="green verge"/>
+                <entry color="150,200,200" name="waterway"/>
+                <entry color="92,92,92" name="no passenger"/>
+                <entry color="red" name="closed"/>
+                <entry color="green" name="connector"/>
+            </colorScheme>
+        </edges>
+        <vehicles vehicleMode="10"
+                  vehicleQuality="2"
+                  vehicle_minSize="2.0"
+                  vehicle_exaggeration="1.3"
+                  vehicle_constantSize="0"
+                  showBlinker="1"
+                  vehicleName_show="1"
+                  vehicleName_size="42"
+                  vehicleName_color="245,245,245"
+                  vehicleName_bgColor="30,35,42,170"
+                  vehicleName_constantSize="1">
+            <colorScheme name="given/assigned vehicle color">
+                <entry color="255,220,0"/>
+            </colorScheme>
+        </vehicles>
+        <pois poi_minSize="2"
+              poi_exaggeration="1.3"
+              poi_constantSize="1"
+              poiName_show="1"
+              poiName_size="46"
+              poiName_color="255,245,210"
+              poiName_bgColor="45,45,45,180"
+              poiName_constantSize="1"/>
+        <polys poly_minSize="0"
+               poly_exaggeration="1"
+               poly_constantSize="0"
+               polyName_show="0"
+               polyType_show="0"/>
+        <legend showSizeLegend="0"/>
+    </scheme>
+    <viewport zoom="300" x="200" y="-1.6" angle="0"/>
+    <delay value="75"/>
+</viewsettings>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+    <input>
+        <net-file value="road.net.xml"/>
+        <route-files value="traffic.rou.xml"/>
+        <additional-files value="visuals.add.xml"/>
+    </input>
+
+    <time>
+        <begin value="0"/>
+        <end value="15"/>
+        <step-length value="0.1"/>
+    </time>
+
+    <processing>
+        <collision.action value="warn"/>
+        <collision.mingap-factor value="0"/>
+        <time-to-teleport value="-1"/>
+    </processing>
+
+    <output>
+        <fcd-output value="outputs/rear_end_fcd.xml"/>
+        <tripinfo-output value="outputs/rear_end_tripinfo.xml"/>
+        <collision-output value="outputs/rear_end_collisions.xml"/>
+    </output>
+
+    <report>
+        <no-step-log value="true"/>
+        <duration-log.disable value="true"/>
+    </report>
+
+    <gui_only>
+        <gui-settings-file value="viewsettings.xml"/>
+    </gui_only>
+</configuration>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+    <!-- Ground, verges and pedestrian strips -->
+    <poly id="scene_ground" type="landuse.grass" color="98,150,88"
+          fill="1" layer="-10" shape="-20,-55 1020,-55 1020,55 -20,55"/>
+    <poly id="north_verge" type="landuse.grass" color="116,170,101"
+          fill="1" layer="-9" shape="-20,1 1020,1 1020,55 -20,55"/>
+    <poly id="south_verge" type="landuse.grass" color="105,160,93"
+          fill="1" layer="-9" shape="-20,-55 1020,-55 1020,-4 -20,-4"/>
+    <poly id="north_walkway" type="sidewalk" color="190,190,184"
+          fill="1" layer="-3" shape="-20,0 1020,0 1020,2.5 -20,2.5"/>
+    <poly id="south_walkway" type="sidewalk" color="190,190,184"
+          fill="1" layer="-3" shape="-20,-5.7 1020,-5.7 1020,-3.2 -20,-3.2"/>
+
+    <!-- Test zone and roadside safety markings -->
+    <poly id="braking_zone" type="V2X emergency-braking test zone" color="255,174,38,80"
+          fill="1" layer="-2" shape="185,-9 315,-9 315,5 185,5"/>
+    <poly id="zone_start_line" type="event marker" color="255,205,64"
+          fill="1" layer="2" shape="198,-5.7 202,-5.7 202,2.5 198,2.5"/>
+    <poly id="zone_end_line" type="event marker" color="255,205,64"
+          fill="1" layer="2" shape="298,-5.7 302,-5.7 302,2.5 298,2.5"/>
+
+    <!-- A small proving-ground control building and parking apron -->
+    <poly id="control_apron" type="amenity.parking" color="118,125,130"
+          fill="1" layer="-4" shape="340,8 470,8 470,47 340,47"/>
+    <poly id="control_center" type="building.control-center" color="225,231,235"
+          fill="1" layer="-1" shape="360,16 445,16 445,40 360,40"/>
+    <poly id="control_center_glass" type="building.glass" color="65,125,160"
+          fill="1" layer="0" shape="370,15.5 435,15.5 435,18 370,18"/>
+    <poly id="parking_bay_1" type="parking marking" color="238,238,220"
+          fill="0" layer="0" lineWidth="0.4" shape="345,10 357,10 357,22 345,22 345,10"/>
+    <poly id="parking_bay_2" type="parking marking" color="238,238,220"
+          fill="0" layer="0" lineWidth="0.4" shape="345,25 357,25 357,37 345,37 345,25"/>
+
+    <!-- Stylized tree rows improve depth without external image assets. -->
+    <poly id="tree_n_1" type="natural.tree" color="43,112,55" fill="1" layer="-1"
+          shape="60,10 64,14 60,18 56,14"/>
+    <poly id="tree_n_2" type="natural.tree" color="50,125,61" fill="1" layer="-1"
+          shape="120,12 125,17 120,22 115,17"/>
+    <poly id="tree_n_3" type="natural.tree" color="43,112,55" fill="1" layer="-1"
+          shape="520,12 525,17 520,22 515,17"/>
+    <poly id="tree_n_4" type="natural.tree" color="50,125,61" fill="1" layer="-1"
+          shape="590,10 594,14 590,18 586,14"/>
+    <poly id="tree_n_5" type="natural.tree" color="43,112,55" fill="1" layer="-1"
+          shape="660,13 665,18 660,23 655,18"/>
+    <poly id="tree_s_1" type="natural.tree" color="40,105,52" fill="1" layer="-1"
+          shape="95,-17 100,-12 95,-7 90,-12"/>
+    <poly id="tree_s_2" type="natural.tree" color="48,120,59" fill="1" layer="-1"
+          shape="155,-20 160,-15 155,-10 150,-15"/>
+    <poly id="tree_s_3" type="natural.tree" color="40,105,52" fill="1" layer="-1"
+          shape="525,-19 530,-14 525,-9 520,-14"/>
+    <poly id="tree_s_4" type="natural.tree" color="48,120,59" fill="1" layer="-1"
+          shape="610,-17 615,-12 610,-7 605,-12"/>
+
+    <poi id="emergency_brake_zone" name="EMERGENCY BRAKE ZONE"
+         type="test-zone" color="255,174,38" icon="pin"
+         layer="10" x="250" y="7"/>
+    <poi id="v2x_mec_control" name="V2X / MEC CONTROL"
+         type="control-center" color="70,180,235" icon="pin"
+         layer="10" x="402" y="45"/>
+</additional>
