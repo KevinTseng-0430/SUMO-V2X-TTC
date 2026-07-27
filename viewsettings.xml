@@ -25,18 +25,37 @@
                 <entry color="green" name="connector"/>
             </colorScheme>
         </edges>
-        <vehicles vehicleMode="10"
+        <!--
+          vehicleMode=0 selects the "given vehicle/type/route color" scheme.
+          Constant-size rendering keeps the car silhouettes visible while the
+          camera follows them at different zoom levels.
+        -->
+        <vehicles vehicleMode="0"
+                  vehicleScaleMode="0"
                   vehicleQuality="2"
-                  vehicle_minSize="2.0"
-                  vehicle_exaggeration="1.3"
-                  vehicle_constantSize="0"
+                  vehicle_minSize="4.0"
+                  vehicle_exaggeration="2.2"
+                  vehicle_constantSize="1"
+                  vehicle_constantSizeSelected="0"
                   showBlinker="1"
                   vehicleName_show="1"
-                  vehicleName_size="42"
-                  vehicleName_color="245,245,245"
-                  vehicleName_bgColor="30,35,42,170"
+                  vehicleName_size="22"
+                  vehicleName_color="255,255,255"
+                  vehicleName_bgColor="25,30,35,90"
                   vehicleName_constantSize="1">
+            <colorScheme name="given vehicle/type/route color">
+                <entry color="255,220,0"/>
+            </colorScheme>
+            <colorScheme name="uniform">
+                <entry color="255,220,0"/>
+            </colorScheme>
             <colorScheme name="given/assigned vehicle color">
+                <entry color="255,220,0"/>
+            </colorScheme>
+            <colorScheme name="given/assigned type color">
+                <entry color="255,220,0"/>
+            </colorScheme>
+            <colorScheme name="given/assigned route color">
                 <entry color="255,220,0"/>
             </colorScheme>
         </vehicles>
