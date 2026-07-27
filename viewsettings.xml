@@ -27,15 +27,15 @@
         </edges>
         <!--
           vehicleMode=0 selects the "given vehicle/type/route color" scheme.
-          Constant-size rendering keeps the car silhouettes visible while the
-          camera follows them at different zoom levels.
+          Physical-size rendering keeps the displayed bumper-to-bumper gap
+          consistent with SUMO's measured gap.
         -->
         <vehicles vehicleMode="0"
                   vehicleScaleMode="0"
                   vehicleQuality="2"
-                  vehicle_minSize="4.0"
-                  vehicle_exaggeration="2.2"
-                  vehicle_constantSize="1"
+                  vehicle_minSize="2.0"
+                  vehicle_exaggeration="1.0"
+                  vehicle_constantSize="0"
                   vehicle_constantSizeSelected="0"
                   showBlinker="1"
                   vehicleName_show="1"
