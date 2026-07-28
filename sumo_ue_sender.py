@@ -29,6 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SUMO_CFG = BASE_DIR / "rear_end.sumocfg"
 DEFAULT_OUTPUT_DIR = BASE_DIR / "outputs"
 DEFAULT_MEC_URL = "http://172.16.6.100/mec/v2x/sumo/report"
+NETWORK_MODES = {"mec", "wan"}
 DEFAULT_UE_INTERFACE = "uesimtun0"
 
 LEADER_ID = "leader_car"
@@ -366,7 +367,7 @@ def interface_exists(interface: str) -> bool:
 def validate_runtime(args: argparse.Namespace) -> None:
     if not args.sumo_cfg.is_file():
         raise RuntimeError(f"SUMO configuration not found: {args.sumo_cfg}")
-    if args.mode == "mec":
+    if args.mode in NETWORK_MODES:
         parsed = urlparse(args.mec_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise RuntimeError(f"Invalid MEC URL: {args.mec_url}")
@@ -500,6 +501,12 @@ def network_row(result: PostResult, current_sim_time: float) -> dict[str, Any]:
         "server_recv_ts": response.get("server_recv_ts", ""),
         "server_send_ts": response.get("server_send_ts", ""),
         "proc_delay_ms": response.get("proc_delay_ms", ""),
+        "server_architecture": response.get("architecture", ""),
+        "server_version": response.get("version", ""),
+        "configured_delay_ms": response.get("configured_delay_ms", ""),
+        "compute_delay_ms": response.get("compute_delay_ms", ""),
+        "response_run_id": response.get("run_id", ""),
+        "response_sequence": response.get("sequence", ""),
         "client_ip_seen_by_mec": response.get("client_ip", ""),
         "gap": finite_or_empty(mec_result.get("gap", "")),
         "relative_speed": finite_or_empty(mec_result.get("relative_speed", "")),
@@ -520,9 +527,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("mec", "baseline", "mec-timeout"),
+        choices=("mec", "wan", "baseline", "mec-timeout"),
         default="mec",
-        help="mec uses live responses; baseline models driver reaction only; "
+        help="mec and wan use live responses and record the architecture "
+        "reported by the server; baseline models driver reaction only; "
         "mec-timeout exercises the no-response fallback.",
     )
     parser.add_argument(
@@ -632,7 +640,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         command.extend(["--delay", "0"])
 
     mec_client: MecClient | None = None
-    if args.mode == "mec":
+    if args.mode in NETWORK_MODES:
         mec_client = MecClient(
             url=args.mec_url,
             interface=args.ue_interface,
@@ -646,7 +654,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     if mec_client:
         interface_label = args.ue_interface or "<routing-table>"
-        print(f"[run] MEC={args.mec_url} interface={interface_label}")
+        print(
+            f"[run] {args.mode.upper()} endpoint={args.mec_url} "
+            f"interface={interface_label}"
+        )
 
     rows: list[dict[str, Any]] = []
     network_rows: list[dict[str, Any]] = []
@@ -760,14 +771,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         set_warning_visual(True)
                         if nrow["accepted_warning"]:
                             print(
-                                f"[event] t={sim_time:.1f}s MEC warning accepted "
+                                f"[event] t={sim_time:.1f}s "
+                                f"{args.mode.upper()} warning accepted "
                                 f"(seq={result.sequence}, RTT={result.rtt_ms:.1f} ms); "
                                 f"driver brake scheduled at "
                                 f"t={follower_brake_scheduled:.1f}s"
                             )
                         else:
                             print(
-                                f"[event] t={sim_time:.1f}s MEC warning arrived "
+                                f"[event] t={sim_time:.1f}s "
+                                f"{args.mode.upper()} warning arrived "
                                 f"too late to replace fallback braking"
                             )
 
@@ -820,7 +833,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     0.0,
                     follower_brake_duration,
                 )
-                source = "MEC warning" if warning_received and not fallback_used else "fallback"
+                source = (
+                    f"{args.mode.upper()} warning"
+                    if warning_received and not fallback_used
+                    else "fallback"
+                )
                 print(
                     f"[event] t={sim_time:.1f}s follower braking from {source} "
                     f"at {args.follower_decel:.1f} m/s²"
@@ -949,6 +966,39 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     successful_posts = sum(bool(row.get("ok")) for row in network_rows)
     failed_posts = len(network_rows) - successful_posts
     collision = bool(seen_collisions) or any(bool(row["collision"]) for row in rows)
+    warning_applied = any(
+        bool(row.get("accepted_warning")) for row in network_rows
+    )
+    server_architectures = sorted(
+        {
+            str(row["server_architecture"])
+            for row in network_rows
+            if row.get("server_architecture")
+        }
+    )
+    configured_delays = sorted(
+        {
+            float(row["configured_delay_ms"])
+            for row in network_rows
+            if isinstance(row.get("configured_delay_ms"), (int, float))
+        }
+    )
+    rtt_values = sorted(
+        float(row["rtt_ms"])
+        for row in network_rows
+        if bool(row.get("ok"))
+        and isinstance(row.get("rtt_ms"), (int, float))
+        and math.isfinite(float(row["rtt_ms"]))
+    )
+    if rtt_values:
+        p95_index = math.ceil(0.95 * len(rtt_values)) - 1
+        latency_summary: dict[str, float | None] = {
+            "mean": sum(rtt_values) / len(rtt_values),
+            "p95": rtt_values[max(0, p95_index)],
+            "max": rtt_values[-1],
+        }
+    else:
+        latency_summary = {"mean": None, "p95": None, "max": None}
 
     summary = {
         "run_id": run_id,
@@ -961,7 +1011,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "minimum_ttc_s": finite_or_none(min(finite_ttcs)) if finite_ttcs else None,
         "leader_brake_sim_time": leader_brake_sim_time,
         "warning_received": warning_received,
-        "warning_applied": warning_received and not fallback_used,
+        "warning_applied": warning_applied,
         "warning_sequence": warning_sequence,
         "warning_report_sim_time": warning_report_sim_time,
         "warning_received_sim_time": warning_received_sim_time,
@@ -969,11 +1019,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "follower_brake_sim_time": follower_brake_sim_time,
         "warning_to_brake_s": (
             follower_brake_sim_time - warning_received_sim_time
+            if warning_applied
+            and follower_brake_sim_time is not None
+            and warning_received_sim_time is not None
+            else None
+        ),
+        "warning_to_actual_brake_s": (
+            follower_brake_sim_time - warning_received_sim_time
             if follower_brake_sim_time is not None
             and warning_received_sim_time is not None
             else None
         ),
         "fallback_used": fallback_used,
+        "server_architectures": server_architectures,
+        "server_configured_delays_ms": configured_delays,
+        "network_rtt_ms": latency_summary,
         "reports_submitted": sequence,
         "reports_completed": len(network_rows),
         "reports_ok": successful_posts,
@@ -990,8 +1050,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "warning_reaction_time": args.warning_reaction_time,
             "fallback_reaction_time": args.fallback_reaction_time,
             "max_response_age": args.max_response_age,
-            "mec_url": args.mec_url if args.mode == "mec" else None,
-            "ue_interface": args.ue_interface if args.mode == "mec" else None,
+            "endpoint_url": args.mec_url if args.mode in NETWORK_MODES else None,
+            "mec_url": args.mec_url if args.mode in NETWORK_MODES else None,
+            "ue_interface": (
+                args.ue_interface if args.mode in NETWORK_MODES else None
+            ),
         },
         "artifacts": {
             "step_csv": str(step_csv),

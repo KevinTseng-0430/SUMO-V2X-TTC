@@ -41,6 +41,8 @@ V2X/MEC markers. The camera automatically tracks the following vehicle.
 | `visuals.add.xml` | Roadside scenery and visual markers |
 | `viewsettings.xml` | GUI colors, labels, zoom, and display settings |
 | `mock_mec_server.py` | Local MEC-compatible test server |
+| `app.py` | FastAPI warning service used unchanged for both MEC and WAN deployments |
+| `requirements-mec.txt` | Python dependencies for `app.py` |
 | `outputs/` | Per-run CSV, JSON, FCD, tripinfo, and collision output |
 
 ## Quick Start
@@ -85,7 +87,91 @@ The mock MEC sends a warning when TTC is less than or equal to 4 seconds and
 adds a 10 ms processing delay by default. Use `--delay-ms` to emulate a longer
 server-side delay.
 
-### 3. Real UE and MEC
+### 3. Deploy the Same App on MEC and WAN
+
+Copy the same `app.py` and `requirements-mec.txt` to both servers. Install and
+start the service:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-mec.txt
+```
+
+On the MEC server:
+
+```bash
+DEPLOYMENT_MODE=mec \
+MEC_ADDED_DELAY_MS=0 \
+TTC_WARNING_THRESHOLD_S=4 \
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+On the external WAN server:
+
+```bash
+DEPLOYMENT_MODE=wan \
+WAN_ADDED_DELAY_MS=500 \
+TTC_WARNING_THRESHOLD_S=4 \
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+Both profiles execute exactly the same TTC algorithm. The WAN profile defaults
+to a controlled 500 ms application delay so that the experiment remains
+repeatable and demonstrates a late-warning collision under the scenario's
+current timing. This delay is returned by the API as
+`configured_delay_ms`, written to the network CSV, and must be reported as an
+emulated WAN delay rather than natural Internet latency. Set
+`WAN_ADDED_DELAY_MS=0` to measure only the real network path.
+
+Verify each deployment before starting SUMO:
+
+```bash
+curl http://MEC_SERVER:8000/status
+curl http://WAN_SERVER:8000/status
+```
+
+The first response must contain `"architecture":"mec"` and the second must
+contain `"architecture":"wan"`.
+
+Run the MEC trial:
+
+```bash
+python3 sumo_ue_sender.py \
+  --mode mec \
+  --mec-url http://MEC_SERVER:8000/mec/v2x/sumo/report \
+  --ue-interface uesimtun0 \
+  --max-inflight 8 \
+  --gui \
+  --realtime
+```
+
+Run the WAN trial with a different run ID:
+
+```bash
+python3 sumo_ue_sender.py \
+  --mode wan \
+  --mec-url http://WAN_SERVER:8000/mec/v2x/sumo/report \
+  --ue-interface uesimtun0 \
+  --mec-timeout 3 \
+  --max-inflight 8 \
+  --gui \
+  --realtime
+```
+
+Using `uesimtun0` for both endpoints gives a fair comparison when the external
+server is reachable through the UE data path. If the external server must use
+the host's normal route, use `--ue-interface ''` for the WAN command and record
+that routing difference with the results.
+
+With the default scenario and controlled delay, the expected result is:
+
+| Deployment | Added delay | Typical result |
+|---|---:|---|
+| MEC | 0 ms | Warning is applied and collision is avoided |
+| WAN | 500 ms | Warning arrives after fallback is committed and collision occurs |
+
+### 4. Real UE and MEC
 
 First, verify that the UERANSIM UE tunnel exists:
 
@@ -126,6 +212,7 @@ python3 sumo_ue_sender.py --ue-interface ''
 | Mode | Behavior |
 |---|---|
 | `mec` | Sends vehicle states and acts on the first valid, non-stale MEC warning |
+| `wan` | Uses the same live-response path but labels the trial as WAN |
 | `baseline` | Does not contact MEC and uses only the 1.5-second driver reaction delay |
 | `mec-timeout` | Generates no network requests and reproduces the no-response fallback path |
 
@@ -178,15 +265,20 @@ Expected risk information in the response:
 
 ```json
 {
+  "service": "v2x-collision-warning",
+  "version": "2.0.0",
+  "architecture": "mec",
+  "configured_delay_ms": 0.0,
+  "compute_delay_ms": 0.03,
   "server_recv_ts": 1785139194.81,
   "server_send_ts": 1785139194.82,
-  "proc_delay_ms": 10.0,
+  "proc_delay_ms": 0.04,
   "client_ip": "10.0.0.2",
   "result": {
     "gap": 24.4,
     "relative_speed": 7.2,
     "ttc": 3.39,
-    "risk_level": "medium",
+    "risk_level": "warning",
     "warning": true,
     "leader_id": "leader_car",
     "follower_id": "follower_car"
@@ -207,9 +299,9 @@ suffix. A fixed ID can be supplied with `--run-id`.
 
 - `<run_id>_steps.csv`: local ground truth for every SUMO simulation step.
 - `<run_id>_network.csv`: MEC RTT, server timing, and risk result for every
-  completed request.
+  completed request, including server architecture and configured delay.
 - `<run_id>_summary.json`: collision outcome, minimum gap/TTC, warning time,
-  and braking time.
+  braking time, server architecture, configured delay, and RTT statistics.
 - `<run_id>_fcd.xml`: SUMO floating-car data.
 - `<run_id>_tripinfo.xml`: SUMO trip information.
 - `<run_id>_collisions.xml`: SUMO collision records.

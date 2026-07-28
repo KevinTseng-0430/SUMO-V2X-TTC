@@ -1,20 +1,84 @@
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
-from typing import List, Optional
-import time
+#!/usr/bin/env python3
+"""V2X rear-end warning service for controlled MEC-versus-WAN trials.
+
+Deploy this exact file in both locations. Select the architecture with
+DEPLOYMENT_MODE=mec or DEPLOYMENT_MODE=wan. Both profiles use the same risk
+algorithm; only the explicitly reported response delay differs.
+"""
+
+from __future__ import annotations
+
+import asyncio
 import math
+import os
+import time
+from dataclasses import dataclass
+from typing import Any
 
-app = FastAPI()
+from fastapi import FastAPI, Request, Response
+from pydantic import BaseModel
 
-TTC_WARNING_THRESHOLD = 2.0
-TTC_CAUTION_THRESHOLD = 5.0
 
-def json_safe_float(value):
-    if isinstance(value, float):
-        if math.isfinite(value):
-            return value
-        return None
+SERVICE_VERSION = "2.0.0"
+LEADER_ID = "leader_car"
+FOLLOWER_ID = "follower_car"
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number, got {raw!r}") from exc
+    if not math.isfinite(value) or value < 0:
+        raise RuntimeError(f"{name} must be a finite non-negative number")
     return value
+
+
+@dataclass(frozen=True)
+class ServiceConfig:
+    architecture: str
+    ttc_warning_threshold_s: float
+    ttc_caution_threshold_s: float
+    added_delay_ms: float
+
+
+def load_config() -> ServiceConfig:
+    architecture = os.environ.get("DEPLOYMENT_MODE", "mec").strip().lower()
+    if architecture not in {"mec", "wan"}:
+        raise RuntimeError("DEPLOYMENT_MODE must be either 'mec' or 'wan'")
+
+    default_delay_ms = 0.0 if architecture == "mec" else 500.0
+    profile_delay_name = (
+        "MEC_ADDED_DELAY_MS" if architecture == "mec" else "WAN_ADDED_DELAY_MS"
+    )
+    profile_delay_ms = env_float(profile_delay_name, default_delay_ms)
+    added_delay_ms = env_float("ADDED_DELAY_MS", profile_delay_ms)
+    warning_threshold = env_float("TTC_WARNING_THRESHOLD_S", 4.0)
+    caution_threshold = env_float("TTC_CAUTION_THRESHOLD_S", 5.0)
+    if warning_threshold <= 0:
+        raise RuntimeError("TTC_WARNING_THRESHOLD_S must be greater than zero")
+    if caution_threshold < warning_threshold:
+        raise RuntimeError(
+            "TTC_CAUTION_THRESHOLD_S must be greater than or equal to "
+            "TTC_WARNING_THRESHOLD_S"
+        )
+
+    return ServiceConfig(
+        architecture=architecture,
+        ttc_warning_threshold_s=warning_threshold,
+        ttc_caution_threshold_s=caution_threshold,
+        added_delay_ms=added_delay_ms,
+    )
+
+
+CONFIG = load_config()
+app = FastAPI(
+    title="SUMO V2X Collision Warning Service",
+    version=SERVICE_VERSION,
+)
 
 
 class VehicleState(BaseModel):
@@ -22,7 +86,7 @@ class VehicleState(BaseModel):
     x: float
     y: float
     speed: float
-    accel: Optional[float] = 0.0
+    accel: float | None = 0.0
     lane_id: str
     lane_pos: float
     length: float = 5.0
@@ -33,171 +97,215 @@ class V2XReport(BaseModel):
     ue_id: str
     sim_time: float
     client_send_ts: float
-    vehicles: List[VehicleState]
+    vehicles: list[VehicleState]
+    run_id: str | None = None
+    sequence: int | None = None
+    event_state: str | None = None
 
 
-@app.get("/status")
-def status():
+def make_json_safe(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [make_json_safe(item) for item in value]
+    return value
+
+
+def invalid_result(reason: str) -> dict[str, Any]:
     return {
-        "service": "mec-v2x",
-        "status": "ok",
-        "ts": time.time()
+        "valid": False,
+        "reason": reason,
+        "warning": False,
+        "risk_level": "unknown",
+        "ttc": None,
+        "gap": None,
+        "relative_speed": None,
+        "leader_id": "",
+        "follower_id": "",
+        "same_lane": False,
     }
 
 
-def compute_rear_end_ttc(vehicles: List[VehicleState]):
+def select_vehicle_pair(
+    vehicles: list[VehicleState],
+) -> tuple[VehicleState, VehicleState] | None:
+    vehicle_map = {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+    if LEADER_ID in vehicle_map and FOLLOWER_ID in vehicle_map:
+        return vehicle_map[LEADER_ID], vehicle_map[FOLLOWER_ID]
+
+    lane_groups: dict[str, list[VehicleState]] = {}
+    for vehicle in vehicles:
+        lane_groups.setdefault(vehicle.lane_id, []).append(vehicle)
+    candidate_groups = [
+        group for group in lane_groups.values() if len(group) >= 2
+    ]
+    if not candidate_groups:
+        return None
+    candidate_group = max(candidate_groups, key=len)
+    ordered = sorted(
+        candidate_group,
+        key=lambda vehicle: vehicle.lane_pos,
+        reverse=True,
+    )
+    return ordered[0], ordered[1]
+
+
+def compute_rear_end_ttc(vehicles: list[VehicleState]) -> dict[str, Any]:
     if len(vehicles) < 2:
-        return {
-            "valid": False,
-            "reason": "need at least two vehicles",
-            "warning": False,
-            "risk_level": "unknown",
-            "ttc": None,
-            "gap": None,
-            "relative_speed": None,
-        }
+        return invalid_result("need at least two vehicles")
 
-    vmap = {v.vehicle_id: v for v in vehicles}
-
-    if "leader_car" in vmap and "follower_car" in vmap:
-        leader = vmap["leader_car"]
-        follower = vmap["follower_car"]
-    else:
-        same_lane_groups = {}
-        for v in vehicles:
-            same_lane_groups.setdefault(v.lane_id, []).append(v)
-
-        candidate_group = max(same_lane_groups.values(), key=len)
-
-        if len(candidate_group) < 2:
-            return {
-                "valid": False,
-                "reason": "no two vehicles on same lane",
-                "warning": False,
-                "risk_level": "unknown",
-                "ttc": None,
-                "gap": None,
-                "relative_speed": None,
-            }
-
-        sorted_cars = sorted(
-            candidate_group,
-            key=lambda v: v.lane_pos,
-            reverse=True
-        )
-        leader = sorted_cars[0]
-        follower = sorted_cars[1]
+    pair = select_vehicle_pair(vehicles)
+    if pair is None:
+        return invalid_result("no two vehicles on the same lane")
+    leader, follower = pair
 
     same_lane = leader.lane_id == follower.lane_id
-
     if not same_lane:
-        return {
-            "valid": False,
-            "reason": "leader and follower are not on the same lane",
-            "warning": False,
-            "risk_level": "safe",
-            "ttc": None,
-            "gap": None,
-            "relative_speed": None,
-            "leader_id": leader.vehicle_id,
-            "follower_id": follower.vehicle_id,
-            "same_lane": False,
-        }
+        result = invalid_result("leader and follower are not on the same lane")
+        result.update(
+            {
+                "risk_level": "safe",
+                "leader_id": leader.vehicle_id,
+                "follower_id": follower.vehicle_id,
+            }
+        )
+        return result
 
-    gap = leader.lane_pos - follower.lane_pos - leader.length
+    # SUMO lane_pos is the front-bumper position. The leader's rear bumper is
+    # therefore leader.lane_pos - leader.length.
+    gap = leader.lane_pos - leader.length - follower.lane_pos
     relative_speed = follower.speed - leader.speed
 
     if gap <= 0:
-        ttc = 0.0
+        ttc: float | None = 0.0
         warning = True
         risk_level = "collision"
     elif relative_speed > 0.1:
         ttc = gap / relative_speed
-
-        if ttc < 1.0:
+        warning = ttc <= CONFIG.ttc_warning_threshold_s
+        if ttc <= 1.0:
             risk_level = "critical"
-        elif ttc < TTC_WARNING_THRESHOLD:
+        elif warning:
             risk_level = "warning"
-        elif ttc < TTC_CAUTION_THRESHOLD:
+        elif ttc <= CONFIG.ttc_caution_threshold_s:
             risk_level = "caution"
         else:
             risk_level = "safe"
-
-        warning = ttc < TTC_WARNING_THRESHOLD
     else:
         ttc = None
         warning = False
         risk_level = "safe"
 
+    return make_json_safe(
+        {
+            "valid": True,
+            "leader_id": leader.vehicle_id,
+            "follower_id": follower.vehicle_id,
+            "same_lane": True,
+            "gap": gap,
+            "relative_speed": relative_speed,
+            "ttc": ttc,
+            "risk_level": risk_level,
+            "warning": warning,
+            "ttc_warning_threshold_s": CONFIG.ttc_warning_threshold_s,
+        }
+    )
+
+
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    return request.client.host if request.client else ""
+
+
+@app.get("/health")
+@app.get("/status")
+def status() -> dict[str, Any]:
     return {
-        "valid": True,
-        "leader_id": leader.vehicle_id,
-        "follower_id": follower.vehicle_id,
-        "same_lane": same_lane,
-        "gap": json_safe_float(gap),
-        "relative_speed": json_safe_float(relative_speed),
-        "ttc": json_safe_float(ttc),
-        "risk_level": risk_level,
-        "warning": warning,
+        "service": "v2x-collision-warning",
+        "version": SERVICE_VERSION,
+        "status": "ok",
+        "architecture": CONFIG.architecture,
+        "configured_delay_ms": CONFIG.added_delay_ms,
+        "ttc_warning_threshold_s": CONFIG.ttc_warning_threshold_s,
+        "ttc_caution_threshold_s": CONFIG.ttc_caution_threshold_s,
+        "server_ts": time.time(),
     }
-    
-def make_json_safe(obj):
-    if isinstance(obj, float):
-        return obj if math.isfinite(obj) else None
-
-    if isinstance(obj, dict):
-        return {key: make_json_safe(value) for key, value in obj.items()}
-
-    if isinstance(obj, list):
-        return [make_json_safe(item) for item in obj]
-
-    return obj
 
 
 @app.post("/report")
-async def report(payload: V2XReport, request: Request):
-    recv_ts = time.time()
-    proc_start = time.perf_counter()
+@app.post("/mec/v2x/sumo/report")
+async def report(
+    payload: V2XReport,
+    request: Request,
+    response: Response,
+) -> dict[str, Any]:
+    server_recv_ts = time.time()
+    total_started = time.perf_counter()
 
+    compute_started = time.perf_counter()
     result = compute_rear_end_ttc(payload.vehicles)
+    compute_delay_ms = (time.perf_counter() - compute_started) * 1000.0
 
-    proc_delay_ms = (time.perf_counter() - proc_start) * 1000.0
+    # asyncio.sleep keeps the service concurrent while creating a controlled,
+    # explicitly reported WAN delay. It is zero in the default MEC profile.
+    if CONFIG.added_delay_ms > 0:
+        await asyncio.sleep(CONFIG.added_delay_ms / 1000.0)
+
     server_send_ts = time.time()
+    proc_delay_ms = (time.perf_counter() - total_started) * 1000.0
+    source_ip = client_ip(request)
 
-    risk_level = result.get("risk_level", "unknown")
-    warning = result.get("warning", False)
-    ttc = result.get("ttc", None)
-    gap = result.get("gap", None)
-    relative_speed = result.get("relative_speed", None)
+    response.headers["X-V2X-Architecture"] = CONFIG.architecture
+    response.headers["X-V2X-Configured-Delay-Ms"] = str(CONFIG.added_delay_ms)
 
-    ttc_str = f"{ttc:.3f}" if isinstance(ttc, (int, float)) else "null"
-    gap_str = f"{gap:.2f}" if isinstance(gap, (int, float)) else "null"
-    rel_speed_str = f"{relative_speed:.2f}" if isinstance(relative_speed, (int, float)) else "null"
-
+    ttc = result.get("ttc")
+    gap = result.get("gap")
+    relative_speed = result.get("relative_speed")
+    ttc_text = f"{ttc:.3f}s" if isinstance(ttc, (int, float)) else "null"
+    gap_text = f"{gap:.2f}" if isinstance(gap, (int, float)) else "null"
+    relative_text = (
+        f"{relative_speed:.2f}"
+        if isinstance(relative_speed, (int, float))
+        else "null"
+    )
     print(
-        f"[MEC-V2X] "
-        f"client={request.client.host} | "
+        f"[V2X-{CONFIG.architecture.upper()}] "
+        f"client={source_ip} | "
+        f"run={payload.run_id or '-'} | "
+        f"seq={payload.sequence if payload.sequence is not None else '-'} | "
         f"sim_time={payload.sim_time:.1f}s | "
-        f"ue={payload.ue_id} | "
-        f"risk={risk_level} | "
-        f"warning={warning} | "
-        f"ttc={ttc_str}s | "
-        f"gap={gap_str}m | "
-        f"v_rel={rel_speed_str}m/s | "
-        f"proc={proc_delay_ms:.3f}ms",
-        flush=True
+        f"risk={result.get('risk_level', 'unknown')} | "
+        f"warning={result.get('warning', False)} | "
+        f"ttc={ttc_text} | gap={gap_text}m | "
+        f"v_rel={relative_text}m/s | "
+        f"compute={compute_delay_ms:.3f}ms | "
+        f"added={CONFIG.added_delay_ms:.1f}ms | "
+        f"total={proc_delay_ms:.3f}ms",
+        flush=True,
     )
 
-    response = {
-        "scenario": payload.scenario,
-        "ue_id": payload.ue_id,
-        "sim_time": payload.sim_time,
-        "client_send_ts": payload.client_send_ts,
-        "server_recv_ts": recv_ts,
-        "server_send_ts": server_send_ts,
-        "proc_delay_ms": proc_delay_ms,
-        "client_ip": request.client.host,
-        "result": result,
-    }
-
-    return make_json_safe(response)
+    return make_json_safe(
+        {
+            "service": "v2x-collision-warning",
+            "version": SERVICE_VERSION,
+            "architecture": CONFIG.architecture,
+            "configured_delay_ms": CONFIG.added_delay_ms,
+            "compute_delay_ms": compute_delay_ms,
+            "scenario": payload.scenario,
+            "ue_id": payload.ue_id,
+            "run_id": payload.run_id,
+            "sequence": payload.sequence,
+            "event_state": payload.event_state,
+            "sim_time": payload.sim_time,
+            "client_send_ts": payload.client_send_ts,
+            "server_recv_ts": server_recv_ts,
+            "server_send_ts": server_send_ts,
+            "proc_delay_ms": proc_delay_ms,
+            "client_ip": source_ip,
+            "result": result,
+        }
+    )
